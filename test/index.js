@@ -23,9 +23,16 @@ async function test() {
     const retObject = await kv.get('object');
     console.log(retObject);
 
+    const arr = await kv.get(['number', 'string', 'object'])
+    console.log(arr);
+
     kv.delete('string');
     retString = await kv.get('string');
     console.log(retString);
+
+    for await (const [key, value] of kv.iterator()) {
+        console.log(key, value);
+    };
 }
 
 test();

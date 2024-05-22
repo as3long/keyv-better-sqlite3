@@ -3,7 +3,6 @@ const EventEmitter = require('events');
 const Sql = require('sql').Sql;
 
 
-
 class KeyvBetterSqlite3 extends EventEmitter {
 	constructor(opts) {
 		super(opts);
@@ -58,6 +57,16 @@ class KeyvBetterSqlite3 extends EventEmitter {
 		return undefined;
 	}
 
+	async getMany(keys) {
+		const select = this.entry.select().where(this.entry.key.in(keys)).toString();
+		const rows = this.db.prepare(select).all();
+		console.log('getMany', select, rows)
+		return keys.map(key => {
+			const row = rows.find((row) => row.key === key);
+			return (row ? row.value : undefined);
+		});
+	}
+
 	set(key, value) {
 		let upsert = this.entry.replace({ key, value }).toString();
 
@@ -67,14 +76,47 @@ class KeyvBetterSqlite3 extends EventEmitter {
 
 	delete(key) {
 		const del = this.entry.delete().where({ key }).toString();
-		const info = this.db.prepare(del).run();
-		return info.changes > 0;
+		this.db.prepare(del).run();
+		return true;
+	}
+
+	deleteMany(keys) {
+		const results = this.getMany(keys);
+		if (results.every(x => x === undefined)) {
+			return false;
+		}
+		const del = this.entry.delete().where(this.entry.key.in(keys)).toString();
+		this.db.prepare(del).run();
+		return true;
 	}
 
 	clear() {
-		const del = this.entry.delete(this.entry.key.like(`${this.namespace}:%`)).toString();
+		const del = this.entry.delete(this.entry.key.like(this.namespace ? `${this.namespace}:%` : '%')).toString();
 		const info = this.db.prepare(del).run();
-		return undefined;
+		return info.changes;
+	}
+
+	* iterator(namespace) {
+		const limit = Number.parseInt(this.opts.iterationLimit, 10) || 10;
+
+		// @ts-expect-error - iterate
+		function * iterate(offset, options, query, db) {
+			const select = query.select().where(query.key.like(`${namespace ? namespace + ':' : ''}%`)).limit(limit).offset(offset).toString();
+			const iterator = db.prepare(select).all();
+			const entries = [...iterator];
+			if (entries.length === 0) {
+				return;
+			}
+
+			for (const entry of entries) {
+				offset += 1;
+				yield [entry.key, entry.value];
+			}
+
+			yield * iterate(offset, options, query, db);
+		}
+
+		yield * iterate(0, this.opts, this.entry, this.db);
 	}
 }
 
